@@ -1,11 +1,11 @@
 FROM node:21-alpine
 
-WORKDIR /Users/hemnaathsurya/Documents/TaskManagement
+WORKDIR E:\Office\Mongodb project\projects\CRM\Task-Management
 
-COPY package.json /Users/hemnaathsurya/Documents/TaskManagement
+COPY package.json E:\Office\Mongodb project\projects\CRM\Task-Management
 
 RUN npm i
 
-COPY . /Users/hemnaathsurya/Documents/TaskManagement
+COPY . E:\Office\Mongodb project\projects\CRM\Task-Management
 
 CMD [ "npm", "start" ]
