@@ -40,7 +40,7 @@ passport.deserializeUser(async (id, done) => {
 });
 
 app.get('/', (req, res) => {
-    res.send('Welcome to my API! Hello, world!');
+    res.send('Welcome to my CRM Project! Hello, world!');
   });
 
 app.use('/api', userRouting);
