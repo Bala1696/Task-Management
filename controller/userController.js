@@ -338,7 +338,7 @@ async function tsWorkedHrs(id) {
     }
 }
 
-async function addDefaultImage(firstName, lastName, srcImagePath, destImagePath) {
+const addDefaultImage= async(req,res,firstName, lastName, srcImagePath, destImagePath)=> {
     try{
         const font = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
         const image = await Jimp.read(srcImagePath);
