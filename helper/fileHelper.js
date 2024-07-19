@@ -1,7 +1,6 @@
 const AWS = require('aws-sdk');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const multerS3 = require('multer-s3');
 const Task = require('../model/taskModel');
 
 // Configure AWS SDK
@@ -13,66 +12,58 @@ AWS.config.update({
 
 const s3 = new AWS.S3();
 
-// Multer configuration for temporary file storage
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/profile_picture');
-    },
-    filename: (req, file, cb) => {
-        cb(null, `${Date.now()}_${file.originalname}`);
-    }
-});
-
-const fileFilter = (req, file, cb) => {
-    const allowedFileTypes = ['image/jpeg', 'image/jpg', 'application/pdf'];
-    if (allowedFileTypes.includes(file.mimetype)) {
-        cb(null, true);
-    } else {
-        cb(new Error('File Type Not Allowed'), false);
-    }
-};
-
+// Multer S3 storage configuration for profile pictures
 const upload = multer({
-    storage: storage,
-    fileFilter: fileFilter
+    storage: multerS3({
+        s3: s3,
+        bucket: process.env.AWS_BUCKET_NAME,
+        acl: 'public-read',
+        key: (req, file, cb) => {
+            cb(null, `uploads/profile_picture/${file.originalname}`);
+        }
+    }),
+    fileFilter: (req, file, cb) => {
+        const allowedFileTypes = ['image/jpeg', 'image/jpg', 'application/pdf'];
+        if (allowedFileTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('File Type Not Allowed'), false);
+        }
+    }
 });
 
-const uploadToS3 = async (filePath, s3Key) => {
-    const fileContent = fs.readFileSync(filePath);
-    const params = {
-        Bucket: process.env.AWS_BUCKET_NAME,
-        Key: s3Key,
-        Body: fileContent,
-        ACL: 'public-read'
-    };
-    await s3.upload(params).promise();
-    fs.unlinkSync(filePath); // Remove the file from the server after upload
-};
+// Multer S3 storage configuration for task attachments
+const taskUpload = multer({
+    storage: multerS3({
+        s3: s3,
+        bucket: process.env.AWS_BUCKET_NAME,
+        acl: 'public-read',
+        key: async (req, file, cb) => {
+            try {
+                const taskData = await Task.findById(req.params.id);
+                if (!taskData) throw new Error('Task not found');
 
-const taskUpload = upload.single('taskFile'); // Assuming a single file upload for task attachments
+                const taskNumber = `${taskData.task_type}-${taskData.task_number}`;
+                const fileName = `${Date.now()}_${file.originalname}`;
+                const s3Key = `task/${taskNumber}/${fileName}`;
 
-const handleTaskUpload = async (req, res) => {
-    try {
-        const taskData = await Task.findById(req.params.id);
-        if (!taskData) {
-            throw new Error('Task not found');
+                taskData.attachments.push({ filename: fileName });
+                await taskData.save();
+
+                cb(null, s3Key);
+            } catch (error) {
+                cb(error);
+            }
         }
-
-        const file = req.file;
-        const taskNumber = `${taskData.task_type}-${taskData.task_number}`;
-        const s3Key = `task/${taskNumber}/${file.filename}`;
-
-        await uploadToS3(file.path, s3Key);
-
-        const attachment = { filename: file.filename, filepath: s3Key };
-        taskData.attachments.push(attachment);
-        await taskData.save();
-
-        res.status(200).json({ message: 'File uploaded successfully', attachment });
-    } catch (error) {
-        console.error('Error in task file upload:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    }),
+    fileFilter: (req, file, cb) => {
+        const allowedFileTypes = ['image/jpeg', 'image/jpg', 'application/pdf'];
+        if (allowedFileTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('File Type Not Allowed'), false);
+        }
     }
-};
+});
 
-module.exports = { upload, taskUpload, handleTaskUpload };
+module.exports = { upload, taskUpload };

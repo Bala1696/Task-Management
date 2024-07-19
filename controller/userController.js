@@ -14,7 +14,6 @@ const AWS = require('aws-sdk');
 const { ObjectId } = require('mongodb')
 require('dotenv').config();
 
-// Configure AWS SDK
 AWS.config.update({
     accessKeyId: process.env.AWS_ACCESS_KEY,
     secretAccessKey: process.env.AWS_SECRET_KEY,
@@ -22,18 +21,6 @@ AWS.config.update({
 });
 
 const s3 = new AWS.S3();
-
-const uploadToS3 = async (filePath, s3Key) => {
-    const fileContent = fs.readFileSync(filePath);
-    const params = {
-        Bucket: process.env.AWS_BUCKET_NAME,
-        Key: s3Key,
-        Body: fileContent,
-        ACL: 'public-read'
-    };
-    await s3.upload(params).promise();
-    fs.unlinkSync(filePath); // Remove the file from the server after upload
-};
 
 const register = async (req, res) => {
     const { firstName, lastName, password, email } = req.body;
@@ -60,9 +47,16 @@ const register = async (req, res) => {
         // Add default image with initials
         const defaultImgName = await addDefaultImage(firstName, lastName, srcImagePath, destImagePath);
 
-        const s3Key = `profile_picture/${defaultImgName}`;
-        await uploadToS3(destImagePath, s3Key);
+        const s3Key = `uploads/profile_picture/${defaultImgName}`;
+        
+        const uploadParams = {
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: s3Key,
+            Body: fs.createReadStream(srcImagePath),
+            ACL: 'public-read'
+        };
 
+        await s3.upload(uploadParams).promise();
         const newUser = await User.create({
             firstName,
             lastName,
