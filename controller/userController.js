@@ -10,42 +10,82 @@ const Timesheet = require('../model/timesheetModel');
 const {jwtDecode} = require('jwt-decode');
 const Jimp = require('jimp');
 const path = require('path');
+const AWS = require('aws-sdk');
 const { ObjectId } = require('mongodb')
 require('dotenv').config();
 
+// Configure AWS SDK
+AWS.config.update({
+    accessKeyId: process.env.AWS_ACCESS_KEY,
+    secretAccessKey: process.env.AWS_SECRET_KEY,
+    region: process.env.AWS_BUCKET_REGION
+});
+
+const s3 = new AWS.S3();
+
+const uploadToS3 = async (filePath, s3Key) => {
+    const fileContent = fs.readFileSync(filePath);
+    const params = {
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: s3Key,
+        Body: fileContent,
+        ACL: 'public-read'
+    };
+    await s3.upload(params).promise();
+    fs.unlinkSync(filePath); // Remove the file from the server after upload
+};
 
 const register = async (req, res) => {
     const { firstName, lastName, password, email } = req.body;
     const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/;
-    let adminCreator, adminData = null;
+
     try {
         if (!passwordRegex.test(password)) {
             return res.status(400).json({ error: 'Invalid Password. It must have at least 8 characters, 1 uppercase letter, 1 special character, and 1 number.' });
         }
-        const existingUser = await User.findOne({email});
+
+        const existingUser = await User.findOne({ email });
         if (existingUser) {
             return res.status(409).json({ error: 'User Already Exists' });
         }
+
         const encryptedPassword = await passcrypt(password, process.env.SALT_ROUNDS);
+        const username = `${firstName}.${lastName}`;
+
+        const adminRole = await Role.findOne({ name: 'admin' }) || await Role.create({ name: 'admin' });
+
         const srcImagePath = path.join(__dirname, '..', 'uploads/profile_picture', 'avatar.png');
-        const destImagePath = path.join(__dirname, '..', 'uploads/profile_picture', `${firstName}.${lastName}.jpg`)
+        const destImagePath = path.join(__dirname, '..', 'uploads/profile_picture', `${username}.jpg`);
+
+        // Add default image with initials
         const defaultImgName = await addDefaultImage(firstName, lastName, srcImagePath, destImagePath);
-        const username = firstName + '.' + lastName;
-        const adminRole = await Role.findOne({ name: 'admin' });
-        if (!adminRole) {
-            adminCreator = await Role.create({name:'admin'});
-        }
-        (adminCreator === undefined) ? adminData = adminRole.id : adminData = adminCreator.id;
-        const newUser = await User.create({ firstName, lastName, username:username, password: encryptedPassword, email, role: adminData, filename:defaultImgName, filepath:`uploads/profile_picture/${defaultImgName}`,is_verified: false  });
+
+        const s3Key = `profile_picture/${defaultImgName}`;
+        await uploadToS3(destImagePath, s3Key);
+
+        const newUser = await User.create({
+            firstName,
+            lastName,
+            username,
+            password: encryptedPassword,
+            email,
+            role: adminRole.id,
+            filename: defaultImgName,
+            filepath: s3Key,
+            is_verified: false
+        });
+
         const token = generateToken({ username, email });
-        const verificationUrl = process.env.VERIFICATION + token;
-        emailHelper.verificationEmail(email, verificationUrl, username);
+        const verificationUrl = `${process.env.VERIFICATION}${token}`;
+
+        await emailHelper.verificationEmail(email, verificationUrl, username);
+
         return res.status(201).json({ message: 'User Created', user: newUser });
     } catch (error) {
-        console.error(error);
+        console.error('Error in user registration:', error);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
-}
+};
 
 const resendVerificationEmail = async (req, res) => {
     const { email } = req.body;
@@ -338,21 +378,21 @@ async function tsWorkedHrs(id) {
     }
 }
 
-const addDefaultImage= async(req,res,firstName, lastName, srcImagePath, destImagePath)=> {
-    try{ 
+const addDefaultImage = async (firstName, lastName, srcImagePath, destImagePath) => {
+    try {
         const font = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
         const image = await Jimp.read(srcImagePath);
         const firstLetterFirstName = firstName.charAt(0).toUpperCase();
         const firstLetterLastName = lastName.charAt(0).toUpperCase();
-        const initials = firstLetterFirstName + firstLetterLastName;
-        image.print(font,20,32,initials);
+        const initials = `${firstLetterFirstName}${firstLetterLastName}`;
+        image.print(font, 20, 32, initials);
         await image.writeAsync(destImagePath);
         return `${firstName}.${lastName}.jpg`;
-    }catch(error){
-        console.error(error);
-        return res.status(500).json({error:'Internal server error'});
+    } catch (error) {
+        console.error('Error generating default image:', error);
+        throw new Error('Internal server error');
     }
-}
+};
 
 
 
